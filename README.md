@@ -1,3 +1,3 @@
-# Reiforcement-Learning3001
+# Reinforcement-Learning-3001
 
 https://github.com/dickreuter/neuron_poker/tree/master
