@@ -192,13 +192,148 @@ class MultiAgentHoldem:
         self.chips[winner] += self.pot
         return self.pot, {'result': 'win', 'winner': winner}
 
-if __name__ == '__main__':
-    env = MultiAgentHoldem(num_players=3)
-    obs = env.reset()
-    done = False
-    while not done:
-        player = env.current_player
+###########################################################################################
+
+import random
+import copy
+import numpy as np
+from itertools import combinations
+from enum import Enum
+import matplotlib.pyplot as plt
+from collections import defaultdict
+
+# --- 你的 MultiAgentHoldem 和辅助函数都放在这里（略） ---
+
+# --- 1. Random Agent ---
+class RandomAgent:
+    def select_action(self, obs):
+        legal_moves = obs['legal_moves']
+        return random.choice(legal_moves) if legal_moves else Action.FOLD.value
+
+# --- 2. Simplified Tabular CFR Agent ---
+class CFR_Agent:
+    def __init__(self):
+        self.regret_sum = defaultdict(lambda: np.zeros(3))  # 3 actions: FOLD, CALL, RAISE
+        self.strategy_sum = defaultdict(lambda: np.zeros(3))
+
+    def _get_strategy(self, infoset):
+        regrets = self.regret_sum[infoset]
+        positive_regrets = np.maximum(regrets, 0)
+        normalizing_sum = positive_regrets.sum()
+        if normalizing_sum > 0:
+            return positive_regrets / normalizing_sum
+        else:
+            return np.array([1/3, 1/3, 1/3])  # Uniform random if no positive regret
+
+    def select_action(self, obs):
+        infoset = self._extract_infoset(obs)
+        strategy = self._get_strategy(infoset)
         legal = obs['legal_moves']
-        action = random.choice(legal) if legal else Action.FOLD.value
-        obs, reward, done, info = env.step(player, action)
-        print(f"Player {player} Action: {Action(action).name} | Reward: {reward} | Info: {info}")
+        probs = np.array([strategy[a] if a in legal else 0 for a in range(3)])
+        probs /= probs.sum()
+        return np.random.choice(range(3), p=probs)
+
+    def train(self, env, iterations=1):
+        for _ in range(iterations):
+            self._cfr(env)
+
+    def _cfr(self, env):
+        env_copy = copy.deepcopy(env)
+        self._cfr_recursive(env_copy, player_id=0)
+
+    def _cfr_recursive(self, env, player_id):
+        if env.stage == Stage.SHOWDOWN or env._only_one_left():
+            return self._get_payoff(env, player_id)
+
+        current_player = env.current_player
+        obs = env._get_observation(current_player)
+        infoset = self._extract_infoset(obs)
+        legal_moves = obs['legal_moves']
+
+        strategy = self._get_strategy(infoset)
+
+        util = np.zeros(3)
+        node_utility = 0
+
+        for a in legal_moves:
+            env_copy = copy.deepcopy(env)
+            obs_next, reward, done, info = env_copy.step(current_player, a)
+            util[a] = -self._cfr_recursive(env_copy, player_id)
+            node_utility += strategy[a] * util[a]
+
+        for a in legal_moves:
+            regret = util[a] - node_utility
+            self.regret_sum[infoset][a] += regret
+            self.strategy_sum[infoset][a] += strategy[a]
+
+        return node_utility
+
+    def _get_payoff(self, env, player_id):
+        alive = [i for i in range(env.num_players) if not env.folded[i]]
+        scores = [(i, evaluate_hand(env.hands[i], env.community_cards)) for i in alive]
+        scores.sort(key=lambda x: x[1], reverse=True)
+        winner = scores[0][0]
+        return 1 if winner == player_id else -1
+
+    def _extract_infoset(self, obs):
+        # 只用 hole cards 和 stage 简化成 infoset
+        return tuple(obs['hole'] + obs['stage'])
+
+# --- 3. 训练和测试主循环 ---
+if __name__ == "__main__":
+    random_agents = [RandomAgent(), RandomAgent()]
+    cfr_agent = CFR_Agent()
+    agents = [cfr_agent] + random_agents  # player 0 是 CFR agent
+
+    num_players = 3
+    env = MultiAgentHoldem(num_players=num_players)
+
+    total_rounds = 100
+    cfr_training_iterations_per_game = 10
+
+    win_counts = np.zeros(num_players)
+    win_record = []
+
+    for episode in range(total_rounds):
+        obs = env.reset()
+        done = False
+        while not done:
+            player = env.current_player
+            obs = env._get_observation(player)
+            action = agents[player].select_action(obs)
+            obs, reward, done, info = env.step(player, action)
+            if done and 'winner' in info:
+                win_counts[info['winner']] += 1
+
+        # After each round, train CFR agent
+        cfr_agent.train(env, iterations=cfr_training_iterations_per_game)
+        win_record.append(win_counts.copy())
+
+        if (episode+1) % 10 == 0:
+            print(f"Episode {episode+1}: Win counts = {win_counts}")
+
+    # Plotting the win rates
+    win_record = np.array(win_record)
+    plt.figure(figsize=(10,6))
+    for pid in range(num_players):
+        plt.plot((win_record[:, pid] / (np.arange(1, total_rounds+1))), label=f"Player {pid} {'(CFR)' if pid == 0 else '(Random)'}")
+    plt.xlabel("Game")
+    plt.ylabel("Win Rate")
+    plt.title("Win Rate Evolution Over Games")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+
+# if __name__ == '__main__':
+#     env = MultiAgentHoldem(num_players=3)
+#     obs = env.reset()
+#     done = False
+#     while not done:
+#         player = env.current_player
+#         legal = obs['legal_moves']
+#         action = random.choice(legal) if legal else Action.FOLD.value
+#         obs, reward, done, info = env.step(player, action)
+#         print(f"Player {player} Action: {Action(action).name} | Reward: {reward} | Info: {info}")
+
+    
