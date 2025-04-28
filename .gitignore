@@ -1,4 +1,4 @@
-# Python
+# Python cache and compiled files
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -8,7 +8,7 @@ __pycache__/
 # Jupyter
 .ipynb_checkpoints/
 
-# Virtual environment
+# Virtual environments
 .env
 venv/
 .venv/
@@ -19,12 +19,14 @@ logs/
 checkpoints/
 outputs/
 *.h5
-*.pt
 *.pth
 
-# IDE
+# Ignore intermediate CFR checkpoints
+cfr_agent_checkpoint_*.pt
+
+# IDE settings
 .vscode/
 .idea/
 
-# System
+# System files
 .DS_Store
